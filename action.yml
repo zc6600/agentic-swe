@@ -1,0 +1,12 @@
+
+name: Documentation Guard
+description: Enforce documentation length limits with actionable feedback.
+
+runs:
+  using: composite
+  steps:
+    - name: Check documentation length
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: python3 "$ACTION_PATH/scripts/check_docs.py" "$GITHUB_WORKSPACE"

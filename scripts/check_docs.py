@@ -38,7 +38,8 @@ def find_docs(root: Path):
 
 
 
-def check_file(path: Path) -> bool:
+def check_file(path: Path, root: Path) -> bool:
+    display_path = path.relative_to(root)
     text = path.read_text(encoding="utf-8")
     count = count_words(text)
     limit = get_limit(path)
@@ -73,7 +74,7 @@ def check_file(path: Path) -> bool:
 
     # 2. Single source of truth for feedback
     feedback = (
-        f"FAIL: {path}\n"
+        f"FAIL: {display_path}\n"
         f"  Type: {spec}\n"
         f"  Reason: {reason}\n"
         f"  Fix: {fix}"
@@ -92,7 +93,7 @@ def check_file(path: Path) -> bool:
             .replace("\n", "%0A")
         )
         print(
-            f"::error file={path},title=Documentation too long::"
+            f"::error file={display_path},title=Documentation too long::"
             f"{escaped}"
         )
 
@@ -100,14 +101,24 @@ def check_file(path: Path) -> bool:
 
 
 
+
 def main() -> int:
-    root = Path.cwd()
+    if len(sys.argv) > 2:
+        print("Usage: check_docs.py [directory]", file=sys.stderr)
+        return 2
+
+    root = Path(sys.argv[1] if len(sys.argv) == 2 else ".").resolve()
+
+    if not root.is_dir():
+        print(f"ERROR: Invalid directory: {root}", file=sys.stderr)
+        return 2
+
     docs = sorted(find_docs(root))
 
     failures = 0
     for path in docs:
         try:
-            if not check_file(path.relative_to(root)):
+            if not check_file(path, root):
                 failures += 1
         except (OSError, UnicodeError) as exc:
             print(f"ERROR: Cannot read {path}: {exc}", file=sys.stderr)
@@ -119,10 +130,6 @@ def main() -> int:
 
     print(f"PASSED: {len(docs)} document(s) checked.")
     return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 
     
 
