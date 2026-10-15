@@ -37,6 +37,7 @@ def find_docs(root: Path):
                 yield path
 
 
+
 def check_file(path: Path) -> bool:
     text = path.read_text(encoding="utf-8")
     count = count_words(text)
@@ -45,30 +46,58 @@ def check_file(path: Path) -> bool:
     if count <= limit:
         return True
 
-    print(f"FAIL: {path}")
-    print(f"  Type: Count: {count} / {limit} (exceeded by {count - limit}), A document should be no longer than 4000 words, while a README.md should be no longer than 2000 words. ")
-    print("  Reason: Excessive documentation length makes")
-    print("          codebases harder to navigate and maintain.")
-
+    # 1. Identify the violated specification
     if limit == README_LIMIT:
-        print("  Fix: Keep the README focused on orientation and")
-        print("       move detailed explanations into docs/.")
+        spec = (
+            f"README.md must not exceed {README_LIMIT} words "
+            f"(actual: {count}, exceeded by {count - limit})."
+        )
+        fix = (
+            "Keep the README focused on orientation and "
+            "move detailed explanations into docs/."
+        )
     else:
-        print("  Fix: Split the document by responsibility and")
-        print("       provide navigation links between sections.")
-
-
-    # GitHub Actions annotation for agents and reviewers
-    if os.environ.get("GITHUB_ACTIONS") == "true":
-        print(
-            f"::error file={path},title=Documentation too long::"
-            f"Counted {count} words; limit is {limit}. "
-            "Keep documents concise. Move detailed content "
-            "into focused documents and add navigation links."
+        spec = (
+            f"Documentation must not exceed {DOC_LIMIT} words "
+            f"(actual: {count}, exceeded by {count - limit})."
+        )
+        fix = (
+            "Split the document by responsibility and "
+            "provide navigation links between sections."
         )
 
+    reason = (
+        "Excessive documentation length makes codebases "
+        "harder to navigate and maintain."
+    )
+
+    # 2. Single source of truth for feedback
+    feedback = (
+        f"FAIL: {path}\n"
+        f"  Type: {spec}\n"
+        f"  Reason: {reason}\n"
+        f"  Fix: {fix}"
+    )
+
+    # 3. Human-readable CI logs
+    print(feedback)
     print()
+
+    # 4. Machine-readable GitHub annotation
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        escaped = (
+            feedback
+            .replace("%", "%25")
+            .replace("\r", "%0D")
+            .replace("\n", "%0A")
+        )
+        print(
+            f"::error file={path},title=Documentation too long::"
+            f"{escaped}"
+        )
+
     return False
+
 
 
 def main() -> int:
