@@ -131,6 +131,6 @@ def main() -> int:
     print(f"PASSED: {len(docs)} document(s) checked.")
     return 0
 
-    
 
-    
+if __name__ == "__main__":
+    sys.exit(main())

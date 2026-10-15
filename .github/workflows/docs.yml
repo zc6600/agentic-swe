@@ -25,5 +25,5 @@ jobs:
           python-version: "3.14"
 
       - name: Check documentation length
-        run: uses: ./
+        uses: ./
  
