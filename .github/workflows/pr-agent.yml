@@ -1,0 +1,65 @@
+name: Reusable PR Agent
+
+on:
+  workflow_call:
+    inputs:
+      validation-command:
+        description: Test or validation command for the caller repository.
+        type: string
+        required: true
+      model:
+        description: OpenRouter model identifier.
+        type: string
+        required: false
+        default: deepseek/deepseek-v4.1-flash
+      auto-merge:
+        description: Push repairs and request GitHub auto-merge.
+        type: boolean
+        required: false
+        default: true
+      merge-method:
+        description: "Merge method: squash, merge, or rebase."
+        type: string
+        required: false
+        default: squash
+      task-instructions:
+        description: Optional repository-specific instructions.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      OPENROUTER_API_KEY:
+        required: true
+      PR_AGENT_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pr-agent-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    if: github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.head.commit.message, '[pr-agent]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Run PR Agent
+        uses: zc6600/agentic-swe/pr-agent@main
+        with:
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          github-token: ${{ secrets.PR_AGENT_TOKEN }}
+          model: ${{ inputs.model }}
+          task-instructions: ${{ inputs.task-instructions }}
+          validation-command: ${{ inputs.validation-command }}
+          auto-merge: ${{ inputs.auto-merge }}
+          merge-method: ${{ inputs.merge-method }}
