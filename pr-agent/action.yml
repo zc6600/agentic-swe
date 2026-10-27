@@ -1,0 +1,51 @@
+name: PR Agent Auto Repair
+description: Merge the PR base, resolve safe conflicts and fixes, validate, push, and enable auto-merge.
+
+inputs:
+  openrouter-api-key:
+    description: OpenRouter API key used by DeepSeek Harness.
+    required: true
+  github-token:
+    description: PAT or GitHub App token with contents:write and pull-requests:write permissions.
+    required: true
+  model:
+    description: OpenRouter model identifier.
+    required: false
+    default: deepseek/deepseek-v4.1-flash
+  task-instructions:
+    description: Additional repository-specific instructions for the agent.
+    required: false
+    default: ""
+  validation-command:
+    description: Shell command that must pass before the agent changes are pushed.
+    required: true
+  auto-merge:
+    description: Enable GitHub auto-merge after pushing validated changes.
+    required: false
+    default: "true"
+  merge-method:
+    description: Merge method to request when auto-merge is enabled (squash, merge, or rebase).
+    required: false
+    default: squash
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Run PR Agent
+      shell: bash
+      env:
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_AGENT_MODEL: ${{ inputs.model }}
+        PR_AGENT_TASK_INSTRUCTIONS: ${{ inputs.task-instructions }}
+        PR_AGENT_VALIDATION_COMMAND: ${{ inputs.validation-command }}
+        PR_AGENT_AUTO_MERGE: ${{ inputs.auto-merge }}
+        PR_AGENT_MERGE_METHOD: ${{ inputs.merge-method }}
+        DSH_PERMISSION_MODE: workspace-write
+        DSH_TELEMETRY_DISABLED: "1"
+      run: python3 "$GITHUB_ACTION_PATH/controller.py"
