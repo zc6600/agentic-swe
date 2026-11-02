@@ -1,0 +1,52 @@
+<p className="feature-kicker">DOCUMENTATION CHECKS</p>
+
+# Documentation Guard
+
+Checks Markdown length and adds actionable annotations to failed GitHub Actions runs. Default limits: 2,000 words for `README.md`, 4,000 for other `.md` and `.mdx` files. Both are configurable.
+
+**For maintainers:** Add one step to CI. No secrets are needed; limits are optional.
+
+<details id="maintainer-setup">
+<summary>Maintainer setup</summary>
+
+Add this step to an existing GitHub Actions job:
+
+```yaml
+- name: Documentation Guard
+  uses: zc6600/agentic-swe@main
+  with:
+    readme-limit: 2000   # optional, words
+    doc-limit: 4000      # optional, words
+```
+
+<button className="copy-button" type="button">Copy workflow step</button>
+
+</details>
+
+<details id="agent-integration">
+<summary>Instructions for coding agents</summary>
+
+Copy these instructions into your coding agent.
+
+```text
+Integrate Documentation Guard into this repository.
+
+1. Inspect the existing GitHub Actions workflows and add the step below to the relevant CI job.
+2. Do not add secrets; this action requires none.
+3. Validate the workflow and report the file changed.
+
+- name: Documentation Guard
+  uses: zc6600/agentic-swe@main
+  with:
+    readme-limit: 2000
+    doc-limit: 4000
+
+The action checks README.md against readme-limit (default 2,000 words) and other .md/.mdx files against doc-limit (default 4,000 words). It reports actionable GitHub annotations when a limit is exceeded.
+Pin the action to a reviewed release or commit SHA for production.
+```
+
+<button className="copy-button" type="button">Copy agent instructions</button>
+
+</details>
+
+[Action source](https://github.com/zc6600/agentic-swe/blob/main/action.yml) · [Repository](https://github.com/zc6600/agentic-swe)

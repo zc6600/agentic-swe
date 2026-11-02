@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   check-documentation:
-    name: Check documentation length
+    name: Documentation Guard
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +24,6 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Check documentation length
+      - name: Documentation Guard
         uses: ./
  

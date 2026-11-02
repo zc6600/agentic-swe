@@ -1,25 +1,42 @@
 # agentic-swe
 
-Reusable GitHub Actions for fast, agent-assisted software iteration.
+Reusable GitHub Actions and a Skills Hub for fast, agent-assisted software iteration.
 
-## PR Agent
+- **Live site**: [agentic-swe.pages.dev](https://agentic-swe.pages.dev)
+- **Skills Hub & Vault**: [agentic-swe.pages.dev/skills/](https://agentic-swe.pages.dev/skills/)
 
-Use the [PR Agent action](docs/pr-agent.md) in a repository where contributors
-open pull requests. It merges the base branch into same-repository PRs, asks an
-agent to resolve simple conflicts and correctness issues, runs your validation
-command, pushes the repair, and can enable GitHub auto-merge.
+## Features
 
-### CI
+### 1. Skills Hub & Personal Vault (`/skills/`)
 
-CI should explain why a change failed and how to fix it.
+- **Official `@agentic-swe` Skills**: Built-in specs (`@agentic-swe/pr-agent-setup`, `@agentic-swe/development-workflow`, `@agentic-swe/documentation-guard`) with bundled workflow examples.
+- **Interactive Configuration**: Supports `{{VAR_NAME:default}}` placeholders with live preview and one-click export for Claude Code (`.claude/skills`), Antigravity (`.agents/skills`), Cursor (`.cursor/skills`), or repository `skills/`.
+- **Personal Cloud Vault**: Sign in with Google to store `@handle/slug` skills privately or share them publicly, import/export `.md` files, or let coding agents sync skills via short-lived tokens (`/skills/api/`).
 
-It should contain path, the Type of rule, the Reason and Fix suggestion.
+### 2. PR Agent (`/pr-agent/`)
 
-For example:
+Use the [PR Agent action](docs/pr-agent.md) to merge the base branch into same-repository pull requests, repair simple conflicts with an agent, run your validation command, push verified fixes, and enable GitHub auto-merge.
+
+### 3. Documentation Guard (`/documentation-guard/`)
+
+Composite action (`zc6600/agentic-swe@main`) enforcing concise documentation limits with actionable GitHub annotations. Defaults: `2000` words for `README.md`, `4000` for other `.md`/`.mdx` files; override with the `readme-limit` and `doc-limit` inputs.
+
+## Website & Deployment
+
+The site is a Next.js static export in [`web/`](web/) backed by Firebase Auth, Firestore, and Cloud Functions ([`infra/firebase/README.md`](infra/firebase/README.md)).
 
 ```bash
+npm ci --prefix web
+npm run dev --prefix web
+```
+
+## CI Feedback Format
+
+CI checks must explain what failed, why, and how to fix it:
+
+```text
 FAIL: <path>
-  Type: <the broken spec>
-  Reason: <reason>
-  Fix: <fix>
+  Type: <broken specification>
+  Reason: <why this matters>
+  Fix: <actionable remediation>
 ```

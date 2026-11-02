@@ -1,0 +1,78 @@
+<p className="feature-kicker">PULL REQUEST AUTOMATION</p>
+
+# PR Agent
+
+Updates a pull request, repairs straightforward conflicts, runs your validation command, and queues passing changes for auto-merge. Fork pull requests are skipped; branch protection remains in control.
+
+**For maintainers:** Add `OPENROUTER_API_KEY` and a write-enabled `PR_AGENT_TOKEN`, choose your test command, and enable GitHub auto-merge.
+
+<details id="maintainer-setup">
+<summary>Maintainer setup</summary>
+
+1. In **Settings → Secrets and variables → Actions**, add `OPENROUTER_API_KEY` and `PR_AGENT_TOKEN`. Use a fine-grained PAT or GitHub App token with **Contents: write** and **Pull requests: write**. `GITHUB_TOKEN` cannot normally trigger CI after a repair push.
+2. Add the workflow below and replace `npm test` with the repository's deterministic validation command.
+3. Enable **Allow auto-merge** and configure required branch checks.
+
+```yaml
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  agent:
+    uses: zc6600/agentic-swe/.github/workflows/pr-agent.yml@main
+    with:
+      validation-command: npm test
+    secrets:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
+```
+
+<button className="copy-button" type="button">Copy workflow</button>
+
+</details>
+
+<details id="agent-integration">
+<summary>Instructions for coding agents</summary>
+
+Copy these instructions into your coding agent. Secret values must be added by a maintainer in GitHub settings.
+
+```text
+Integrate PR Agent into this repository.
+
+1. Inspect the default branch, existing pull request workflows, language, package manager, and deterministic validation command.
+2. Add .github/workflows/pr-agent.yml using the template below. Replace npm test with the detected validation command.
+3. Do not ask for, read, or write secret values. Tell the maintainer to add OPENROUTER_API_KEY and PR_AGENT_TOKEN in repository Actions settings. PR_AGENT_TOKEN needs Contents: write and Pull requests: write.
+4. Tell the maintainer to enable GitHub auto-merge and required branch checks. Fork pull requests are skipped.
+5. Validate the workflow and report the changed file, chosen validation command, and remaining maintainer steps.
+
+name: PR Agent
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  agent:
+    uses: zc6600/agentic-swe/.github/workflows/pr-agent.yml@main
+    with:
+      validation-command: npm test
+    secrets:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
+
+Never replace the repository's test command with `true`. Pin the workflow to a reviewed release or commit SHA for production.
+```
+
+<button className="copy-button" type="button">Copy agent instructions</button>
+
+</details>
+
+[Workflow source](https://github.com/zc6600/agentic-swe/blob/main/.github/workflows/pr-agent.yml) · [Repository](https://github.com/zc6600/agentic-swe)

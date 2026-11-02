@@ -1,0 +1,114 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: /users/{userId}/skills/{skillId} (and collectionGroup: skills)
+// Document ID: {skillId}
+// Fields:
+//   - title: string (required, 1..100 chars) - skill title
+//   - description: string (required, 0..500 chars) - short summary
+//   - content: string (required, 1..100000 chars) - full markdown content
+//   - slug: string (optional, 1..80 chars, kebab-case) - URL-friendly identifier
+//   - visibility: string (optional, 'private' | 'public') - access level, defaults to 'private'
+//   - ownerHandle: string (optional, 1..60 chars) - display handle of owner
+//   - ownerUid: string (optional, must equal userId) - owner UID for collectionGroup queries
+//   - createdAt: timestamp (required, immutable on update) - creation timestamp
+//   - updatedAt: timestamp (required, must equal request.time) - last modification timestamp
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function ownsUser(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isPublicSkill(data) {
+      return data.get('visibility', 'private') == 'public';
+    }
+
+    function validSkillSlug(data) {
+      return !('slug' in data)
+        || (data.slug is string
+          && data.slug.size() >= 1
+          && data.slug.size() <= 80
+          && data.slug.matches('^[a-z0-9]+(-[a-z0-9]+)*$'));
+    }
+
+    function validSkillVisibility(data) {
+      return !('visibility' in data)
+        || (data.visibility is string
+          && data.visibility in ['private', 'public']);
+    }
+
+    function validSkillOwnerHandle(data) {
+      return !('ownerHandle' in data)
+        || (data.ownerHandle is string
+          && data.ownerHandle.size() >= 1
+          && data.ownerHandle.size() <= 60);
+    }
+
+    function validSkillOwnerUid(data, userId) {
+      return !('ownerUid' in data)
+        || (data.ownerUid is string
+          && data.ownerUid == userId);
+    }
+
+    function validSkill(data, userId) {
+      return data.keys().hasAll(['title', 'description', 'content', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'title',
+          'description',
+          'content',
+          'slug',
+          'visibility',
+          'ownerHandle',
+          'ownerUid',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 100
+        && data.description is string
+        && data.description.size() <= 500
+        && data.content is string
+        && data.content.size() > 0
+        && data.content.size() <= 100000
+        && validSkillSlug(data)
+        && validSkillVisibility(data)
+        && validSkillOwnerHandle(data)
+        && validSkillOwnerUid(data, userId)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId}/skills/{skillId} {
+      allow get, list: if ownsUser(userId) || isPublicSkill(resource.data);
+      allow create: if ownsUser(userId)
+        && validSkill(request.resource.data, userId)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if ownsUser(userId)
+        && validSkill(request.resource.data, userId)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if ownsUser(userId);
+    }
+
+    match /{path=**}/skills/{skillId} {
+      allow get, list: if isPublicSkill(resource.data)
+        || (isAuthenticated() && request.auth.uid == resource.data.get('ownerUid', ''));
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
