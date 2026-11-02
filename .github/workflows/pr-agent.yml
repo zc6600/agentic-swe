@@ -17,6 +17,11 @@ on:
         type: boolean
         required: false
         default: true
+      trigger-on:
+        description: "When to invoke the agent: conflict-only (default) or always."
+        type: string
+        required: false
+        default: conflict-only
       merge-method:
         description: "Merge method: squash, merge, or rebase."
         type: string
@@ -62,4 +67,5 @@ jobs:
           task-instructions: ${{ inputs.task-instructions }}
           validation-command: ${{ inputs.validation-command }}
           auto-merge: ${{ inputs.auto-merge }}
+          trigger-on: ${{ inputs.trigger-on }}
           merge-method: ${{ inputs.merge-method }}

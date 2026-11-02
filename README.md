@@ -15,7 +15,7 @@ Reusable GitHub Actions and a Skills Hub for fast, agent-assisted software itera
 
 ### 2. PR Agent (`/pr-agent/`)
 
-Use the [PR Agent action](docs/pr-agent.md) to merge the base branch into same-repository pull requests, repair simple conflicts with an agent, run your validation command, push verified fixes, and enable GitHub auto-merge.
+Use the [PR Agent action](docs/pr-agent.md) to merge the base branch into same-repository pull requests, repair conflicts with an agent (`trigger-on: conflict-only` by default, or `always`), run your validation command, push verified fixes, and enable GitHub auto-merge.
 
 ### 3. Documentation Guard (`/documentation-guard/`)
 

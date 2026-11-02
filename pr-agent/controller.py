@@ -13,6 +13,7 @@ from pathlib import Path
 DSH_VERSION = "0.2.1-rc.2"
 MODEL_PATTERN = re.compile(r"[A-Za-z0-9._/-]+\Z")
 MERGE_METHODS = {"squash", "merge", "rebase"}
+TRIGGER_MODES = {"conflict-only", "always"}
 
 
 class ActionError(RuntimeError):
@@ -133,6 +134,7 @@ def main() -> int:
     model = os.environ.get("PR_AGENT_MODEL", "deepseek/deepseek-v4.1-flash")
     merge_method = os.environ.get("PR_AGENT_MERGE_METHOD", "squash").lower()
     auto_merge = os.environ.get("PR_AGENT_AUTO_MERGE", "true").lower()
+    trigger_on = os.environ.get("PR_AGENT_TRIGGER_ON", "conflict-only").strip().lower()
     task_instructions = os.environ.get("PR_AGENT_TASK_INSTRUCTIONS", "").strip()
     validation_command = os.environ.get("PR_AGENT_VALIDATION_COMMAND", "true").strip()
 
@@ -140,6 +142,8 @@ def main() -> int:
         raise ActionError("merge-method must be one of: squash, merge, rebase.")
     if auto_merge not in {"true", "false"}:
         raise ActionError("auto-merge must be 'true' or 'false'.")
+    if trigger_on not in TRIGGER_MODES:
+        raise ActionError("trigger-on must be 'conflict-only' or 'always'.")
 
     print(f"Fetching base branch {base_ref} for PR #{pr_number}.")
     git(
@@ -162,11 +166,36 @@ def main() -> int:
         print(merge.stdout, end="")
     if merge.stderr:
         print(merge.stderr, file=sys.stderr, end="")
+
+    has_conflicts = False
     if merge.returncode:
         conflicts = git(workspace, "ls-files", "-u", capture=True).stdout.strip()
         if not conflicts:
             raise ActionError("Merging the base branch failed without a resolvable file conflict.")
+        has_conflicts = True
         print("Base merge has conflicts; asking the agent to resolve them.")
+    else:
+        print("Base merge succeeded cleanly without conflicts.")
+
+    env = os.environ.copy()
+    env["DSH_PERMISSION_MODE"] = "workspace-write"
+    env["DSH_TELEMETRY_DISABLED"] = "1"
+    auth_env = env.copy()
+    auth_env.pop("OPENROUTER_API_KEY", None)
+
+    if trigger_on == "conflict-only" and not has_conflicts:
+        print("Skipping agent invocation: no merge conflicts detected and trigger-on is 'conflict-only'.")
+        if (workspace / ".git" / "MERGE_HEAD").is_file():
+            git(workspace, "merge", "--abort", check=False)
+        git(workspace, "reset", "--hard", "HEAD", check=False)
+        if auto_merge == "true":
+            run(
+                ["gh", "pr", "merge", str(pr_number), "--auto", f"--{merge_method}"],
+                cwd=workspace,
+                env=auth_env,
+            )
+            print(f"Auto-merge enabled for clean PR #{pr_number} ({merge_method}).")
+        return 0
 
     github_diff_before = git_hunks(workspace, ".github")
     instructions = (
@@ -180,13 +209,8 @@ def main() -> int:
         instructions += f"Repository-specific instructions:\n{task_instructions}\n"
     instructions += "After finishing, end your final response with a standalone PASS or BLOCK line."
 
-    env = os.environ.copy()
-    env["DSH_PERMISSION_MODE"] = "workspace-write"
-    env["DSH_TELEMETRY_DISABLED"] = "1"
     dsh_env = env.copy()
     dsh_env.pop("GH_TOKEN", None)
-    auth_env = env.copy()
-    auth_env.pop("OPENROUTER_API_KEY", None)
     with tempfile.TemporaryDirectory(prefix="pr-agent-") as temp_dir:
         config_path = Path(temp_dir) / "dsh-openrouter.yml"
         config_path.write_text(make_dsh_config(model), encoding="utf-8")

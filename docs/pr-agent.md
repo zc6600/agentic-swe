@@ -34,12 +34,13 @@ jobs:
     uses: zc6600/agentic-swe/.github/workflows/pr-agent.yml@main
     with:
       validation-command: npm test
+      trigger-on: conflict-only
     secrets:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
 ```
 
-Change `npm test` to the repository's test command. Auto-merge defaults to on;
+Change `npm test` to the repository's test command. `trigger-on` defaults to `conflict-only`, which only calls the agent when merging the base branch generates conflicts (saving model tokens on clean PRs). Set `trigger-on: always` if you want the agent to review every PR. Auto-merge defaults to on;
 disable it with `auto-merge: false`. Enable **Allow auto-merge** and configure
 branch protection checks in GitHub. The workflow only runs for branches in the
 same repository; fork PRs are skipped.

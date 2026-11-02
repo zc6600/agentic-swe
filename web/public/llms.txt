@@ -12,7 +12,7 @@ Available at https://agentic-swe.pages.dev/skills/.
 
 ## PR Agent
 
-Repairs straightforward same-repository pull request conflicts, runs a caller-provided validation command, pushes only after a PASS result, and can request GitHub auto-merge. Fork pull requests are skipped.
+Repairs same-repository pull request conflicts (defaults to `trigger-on: conflict-only` to save tokens, with `always` optional), runs a caller-provided validation command, pushes only after a PASS result, and can request GitHub auto-merge. Fork pull requests are skipped.
 
 Human setup: add `OPENROUTER_API_KEY` and `PR_AGENT_TOKEN` (`Contents: write`, `Pull requests: write`) as repository Actions secrets. Enable GitHub auto-merge and required branch checks.
 

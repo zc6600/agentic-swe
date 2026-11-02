@@ -8,7 +8,8 @@ description: Set up the reusable PR Agent in a GitHub repository so it can resol
 1. Add `OPENROUTER_API_KEY` and `PR_AGENT_TOKEN` as repository Actions secrets.
 2. Copy [`examples/pr-agent.yml`](examples/pr-agent.yml) to `.github/workflows/pr-agent.yml`.
 3. Replace `npm test` with the repository's validation command.
-4. Enable GitHub auto-merge and required branch checks.
+4. Set `trigger-on` (default: `conflict-only`, or `always` to review every PR).
+5. Enable GitHub auto-merge and required branch checks.
 
 Use a fine-grained PAT or GitHub App token for `PR_AGENT_TOKEN`; the action uses
 it to push repairs and update PRs, and its pushes trigger the repository's CI.

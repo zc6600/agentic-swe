@@ -23,6 +23,10 @@ inputs:
     description: Enable GitHub auto-merge after pushing validated changes.
     required: false
     default: "true"
+  trigger-on:
+    description: When to invoke the agent (conflict-only or always).
+    required: false
+    default: conflict-only
   merge-method:
     description: Merge method to request when auto-merge is enabled (squash, merge, or rebase).
     required: false
@@ -45,6 +49,7 @@ runs:
         PR_AGENT_TASK_INSTRUCTIONS: ${{ inputs.task-instructions }}
         PR_AGENT_VALIDATION_COMMAND: ${{ inputs.validation-command }}
         PR_AGENT_AUTO_MERGE: ${{ inputs.auto-merge }}
+        PR_AGENT_TRIGGER_ON: ${{ inputs.trigger-on }}
         PR_AGENT_MERGE_METHOD: ${{ inputs.merge-method }}
         DSH_PERMISSION_MODE: workspace-write
         DSH_TELEMETRY_DISABLED: "1"
