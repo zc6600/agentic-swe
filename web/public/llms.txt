@@ -1,0 +1,31 @@
+# agentic-swe
+
+Reusable GitHub Actions and Skills Hub for agent-assisted software development.
+
+## Skills Hub & Personal Vault
+
+Available at https://agentic-swe.pages.dev/skills/.
+- Provides official `@agentic-swe` skills (`@agentic-swe/pr-agent-setup`, `@agentic-swe/development-workflow`, `@agentic-swe/documentation-guard`).
+- Supports interactive `{{VAR_NAME:default}}` template variables, rendered vs. raw `SKILL.md` inspection, bundled workflow files, and one-click install prompts/CLI commands for `.claude/skills`, `.agents/skills`, `.cursor/skills`, and `skills/`.
+- Signed-in users can store `@handle/slug` skills in their private vault or mark them `public`, and generate temporary agent upload tokens at https://agentic-swe.pages.dev/skills/api/.
+- Raw skill endpoint: `GET https://asia-southeast1-agentic-swe-skills.cloudfunctions.net/getRawSkill?owner=<handle>&slug=<slug>&VAR=value`.
+
+## PR Agent
+
+Repairs straightforward same-repository pull request conflicts, runs a caller-provided validation command, pushes only after a PASS result, and can request GitHub auto-merge. Fork pull requests are skipped.
+
+Human setup: add `OPENROUTER_API_KEY` and `PR_AGENT_TOKEN` (`Contents: write`, `Pull requests: write`) as repository Actions secrets. Enable GitHub auto-merge and required branch checks.
+
+## Documentation Guard
+
+Composite GitHub Action at `zc6600/agentic-swe@main`. Checks `README.md` (default 2,000 words) and other Markdown files (default 4,000 words); set `readme-limit` and `doc-limit` inputs to change them. No secrets required.
+
+## Pages
+
+- https://agentic-swe.pages.dev/skills/
+- https://agentic-swe.pages.dev/skills/api/
+- https://agentic-swe.pages.dev/pr-agent/
+- https://agentic-swe.pages.dev/documentation-guard/
+- https://agentic-swe.pages.dev/login/
+
+Source: https://github.com/zc6600/agentic-swe

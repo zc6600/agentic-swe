@@ -1,12 +1,23 @@
-
 name: Documentation Guard
 description: Enforce documentation length limits with actionable feedback.
+
+inputs:
+  readme-limit:
+    description: Maximum words allowed in README files.
+    required: false
+    default: "2000"
+  doc-limit:
+    description: Maximum words allowed in other .md and .mdx files.
+    required: false
+    default: "4000"
 
 runs:
   using: composite
   steps:
-    - name: Check documentation length
+    - name: Documentation Guard
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
+        README_LIMIT: ${{ inputs.readme-limit }}
+        DOC_LIMIT: ${{ inputs.doc-limit }}
       run: python3 "$ACTION_PATH/scripts/check_docs.py" "$GITHUB_WORKSPACE"

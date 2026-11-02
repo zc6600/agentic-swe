@@ -1,0 +1,23 @@
+{
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22"
+  },
+  "firestore": {
+    "rules": "infra/firebase/firestore.rules",
+    "indexes": "infra/firebase/firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "agentic-swe",
+        "supportEmail": "zc18202534657@gmail.com",
+        "authorizedRedirectUris": [
+          "https://agentic-swe.pages.dev",
+          "https://private-skills-preview.agentic-swe.pages.dev",
+          "http://localhost:8000"
+        ]
+      }
+    }
+  }
+}

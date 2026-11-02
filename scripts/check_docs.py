@@ -1,13 +1,14 @@
 
-"""Enforce repository documentation length limits."""
+"""Documentation Guard: enforce repository documentation length limits."""
 
+import argparse
 import os
 import re
 import sys
 from pathlib import Path
 
-README_LIMIT = 2000
-DOC_LIMIT = 4000
+DEFAULT_README_LIMIT = 2000
+DEFAULT_DOC_LIMIT = 4000
 
 # One Chinese character or one English word counts as one unit.
 WORD_PATTERN = re.compile(
@@ -21,10 +22,10 @@ def count_words(text: str) -> int:
     return len(WORD_PATTERN.findall(text))
 
 
-def get_limit(path: Path) -> int:
+def get_limit(path: Path, readme_limit: int, doc_limit: int) -> int:
     if path.stem.lower() == "readme":
-        return README_LIMIT
-    return DOC_LIMIT
+        return readme_limit
+    return doc_limit
 
 
 def find_docs(root: Path):
@@ -38,19 +39,19 @@ def find_docs(root: Path):
 
 
 
-def check_file(path: Path, root: Path) -> bool:
+def check_file(path: Path, root: Path, readme_limit: int, doc_limit: int) -> bool:
     display_path = path.relative_to(root)
     text = path.read_text(encoding="utf-8")
     count = count_words(text)
-    limit = get_limit(path)
+    limit = get_limit(path, readme_limit, doc_limit)
 
     if count <= limit:
         return True
 
     # 1. Identify the violated specification
-    if limit == README_LIMIT:
+    if path.stem.lower() == "readme":
         spec = (
-            f"README.md must not exceed {README_LIMIT} words "
+            f"README.md must not exceed {limit} words "
             f"(actual: {count}, exceeded by {count - limit})."
         )
         fix = (
@@ -59,7 +60,7 @@ def check_file(path: Path, root: Path) -> bool:
         )
     else:
         spec = (
-            f"Documentation must not exceed {DOC_LIMIT} words "
+            f"Documentation must not exceed {limit} words "
             f"(actual: {count}, exceeded by {count - limit})."
         )
         fix = (
@@ -102,12 +103,43 @@ def check_file(path: Path, root: Path) -> bool:
 
 
 
-def main() -> int:
-    if len(sys.argv) > 2:
-        print("Usage: check_docs.py [directory]", file=sys.stderr)
-        return 2
+def positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a whole number")
+    if number < 1:
+        raise argparse.ArgumentTypeError("limit must be at least 1")
+    return number
 
-    root = Path(sys.argv[1] if len(sys.argv) == 2 else ".").resolve()
+
+def env_limit(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return positive_int(raw)
+    except argparse.ArgumentTypeError as exc:
+        print(f"ERROR: Invalid {name}: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Documentation Guard: enforce Markdown word limits.")
+    parser.add_argument("directory", nargs="?", default=".")
+    parser.add_argument(
+        "--readme-limit", type=positive_int,
+        default=env_limit("README_LIMIT", DEFAULT_README_LIMIT),
+        help=f"Max words for README files (default {DEFAULT_README_LIMIT}, env README_LIMIT).",
+    )
+    parser.add_argument(
+        "--doc-limit", type=positive_int,
+        default=env_limit("DOC_LIMIT", DEFAULT_DOC_LIMIT),
+        help=f"Max words for other .md/.mdx files (default {DEFAULT_DOC_LIMIT}, env DOC_LIMIT).",
+    )
+    args = parser.parse_args()
+
+    root = Path(args.directory).resolve()
 
     if not root.is_dir():
         print(f"ERROR: Invalid directory: {root}", file=sys.stderr)
@@ -118,7 +150,7 @@ def main() -> int:
     failures = 0
     for path in docs:
         try:
-            if not check_file(path, root):
+            if not check_file(path, root, args.readme_limit, args.doc_limit):
                 failures += 1
         except (OSError, UnicodeError) as exc:
             print(f"ERROR: Cannot read {path}: {exc}", file=sys.stderr)

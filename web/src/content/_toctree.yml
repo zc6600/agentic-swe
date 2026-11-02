@@ -1,0 +1,6 @@
+- local: index
+  title: agentic-swe
+- local: pr-agent
+  title: PR Agent
+- local: documentation-guard
+  title: Documentation Guard
