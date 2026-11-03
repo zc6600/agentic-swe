@@ -1,7 +1,8 @@
-"""Run the PR repair workflow inside a checked-out GitHub workspace."""
+"""Repair a checked-out PR and emit an auditable patch; never publish changes."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -12,73 +13,62 @@ from pathlib import Path
 
 DSH_VERSION = "0.2.1-rc.2"
 MODEL_PATTERN = re.compile(r"[A-Za-z0-9._/-]+\Z")
-MERGE_METHODS = {"squash", "merge", "rebase"}
 TRIGGER_MODES = {"conflict-only", "always"}
 
 
 class ActionError(RuntimeError):
-    """An expected action failure with a user-facing message."""
+    """An expected PR repair failure, reported as BLOCK or ERROR."""
 
 
-def run(
-    command: list[str],
-    *,
-    cwd: Path,
-    check: bool = True,
-    capture: bool = False,
-    env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, cwd: Path, check: bool = True,
+        capture: bool = False, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        command,
-        cwd=cwd,
-        check=False,
-        text=True,
+        command, cwd=cwd, check=False, text=True,
         stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.PIPE if capture else None,
-        env=env,
+        stderr=subprocess.PIPE if capture else None, env=env,
     )
     if check and result.returncode:
         if capture and result.stderr:
             print(result.stderr, file=sys.stderr, end="")
-        raise ActionError(f"Command failed ({result.returncode}): {' '.join(command)}")
+        raise ActionError(f"Command failed ({result.returncode}): {command[0]}")
     return result
 
 
 def git(cwd: Path, *args: str, check: bool = True, capture: bool = False):
     env = os.environ.copy()
-    env.pop("OPENROUTER_API_KEY", None)
+    for key in ("OPENROUTER_API_KEY", "GH_TOKEN", "GITHUB_TOKEN", "PR_AGENT_TOKEN"):
+        env.pop(key, None)
     return run(["git", *args], cwd=cwd, check=check, capture=capture, env=env)
 
 
-def get_pull_request(workspace: Path) -> tuple[int, str, str]:
+def get_pull_request() -> dict:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path:
-        raise ActionError("GITHUB_EVENT_PATH is missing; invoke this action from a pull_request workflow.")
-
+        raise ActionError("GITHUB_EVENT_PATH is missing; run from a PR workflow.")
     try:
         event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-        pull_request = event["pull_request"]
-        number = int(pull_request["number"])
-        head = pull_request["head"]
-        base_ref = str(pull_request["base"]["ref"])
-        head_ref = str(head["ref"])
-        head_repo = str(head["repo"]["full_name"])
+        pr = event["pull_request"]
+        details = {
+            "pr_number": int(pr["number"]),
+            "base_ref": str(pr["base"]["ref"]),
+            "base_sha_at_event": str(pr["base"]["sha"]),
+            "head_ref": str(pr["head"]["ref"]),
+            "head_sha": str(pr["head"]["sha"]),
+            "head_repo": str(pr["head"]["repo"]["full_name"]),
+            "repository": str(os.environ["GITHUB_REPOSITORY"]),
+        }
     except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError) as exc:
-        raise ActionError(f"Could not read pull request details from the event payload: {exc}") from exc
-
-    repository = os.environ.get("GITHUB_REPOSITORY", "")
-    if head_repo != repository:
-        raise ActionError("PR Agent only accepts same-repository branches so its secrets stay protected.")
-    if not base_ref or not head_ref or number < 1:
-        raise ActionError("The pull request event is missing its number or branch names.")
-
-    return number, head_ref, base_ref
+        raise ActionError(f"Invalid pull request event payload: {exc}") from exc
+    if details["pr_number"] < 1 or not details["base_ref"] or not details["head_ref"]:
+        raise ActionError("Invalid pull request number or branch reference.")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", details["head_sha"]):
+        raise ActionError("Invalid PR head SHA.")
+    return details
 
 
 def make_dsh_config(model: str) -> str:
     if not MODEL_PATTERN.fullmatch(model):
         raise ActionError("Model must contain only letters, digits, '.', '_', '/', or '-'.")
-
     return f"""- id: llm-pi-ai
   config:
     providers:
@@ -108,199 +98,182 @@ def make_dsh_config(model: str) -> str:
 """
 
 
-def git_hunks(cwd: Path, pathspec: str) -> bytes:
-    result = subprocess.run(
-        ["git", "diff", "HEAD", "--binary", "--", pathspec],
-        cwd=cwd,
-        check=True,
-        stdout=subprocess.PIPE,
-    )
-    return result.stdout
+def snapshot_directory(root: Path) -> dict[str, tuple[str, str]]:
+    """Include untracked files and symlinks when guarding workflow definitions."""
+    snapshot: dict[str, tuple[str, str]] = {}
+    if not root.exists() and not root.is_symlink():
+        return snapshot
+    for path in (root, *sorted(root.rglob("*"))):
+        name = str(path.relative_to(root.parent))
+        if path.is_symlink():
+            snapshot[name] = ("symlink", os.readlink(path))
+        elif path.is_file():
+            snapshot[name] = ("file", hashlib.sha256(path.read_bytes()).hexdigest())
+        elif path.is_dir():
+            snapshot[name] = ("directory", "")
+    return snapshot
+
+
+def output_directory() -> Path:
+    root = Path(os.environ.get("GITHUB_WORKSPACE", ".")).resolve()
+    default = Path(os.environ.get("RUNNER_TEMP", tempfile.gettempdir())) / "pr-agent-output"
+    output = Path(os.environ.get("PR_AGENT_OUTPUT_DIR", str(default))).resolve()
+    if output == root or root in output.parents:
+        raise ActionError("PR_AGENT_OUTPUT_DIR must be outside the checked-out repository.")
+    output.mkdir(parents=True, exist_ok=True)
+    return output
+
+
+def write_result(output: Path, data: dict, patch: bytes = b"") -> None:
+    patch_file = output / "repair.patch"
+    patch_file.write_bytes(patch)
+    data["has_changes"] = bool(patch)
+    data["patch_file"] = "repair.patch" if patch else None
+    data["patch_sha256"] = hashlib.sha256(patch).hexdigest() if patch else None
+    (output / "result.json").write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    gh_output = os.environ.get("GITHUB_OUTPUT")
+    if gh_output:
+        with open(gh_output, "a", encoding="utf-8") as stream:
+            stream.write(f"verdict={data['verdict']}\n")
+            stream.write(f"has-changes={str(bool(patch)).lower()}\n")
+            stream.write(f"result-path={output / 'result.json'}\n")
+            stream.write(f"patch-path={patch_file}\n")
 
 
 def main() -> int:
-    workspace = Path(os.environ.get("GITHUB_WORKSPACE", ".")).resolve()
-    if not workspace.is_dir():
-        raise ActionError(f"Workspace does not exist: {workspace}")
+    output = output_directory()
+    report: dict = {
+        "schema_version": 1,
+        "verdict": "ERROR",
+        "reason": "not-started",
+        "agent_invoked": False,
+        "conflicts_found": None,
+        "validation_passed": None,
+        "base_sha": None,
+    }
+    patch = b""
+    try:
+        workspace = Path(os.environ.get("GITHUB_WORKSPACE", ".")).resolve()
+        if not workspace.is_dir():
+            raise ActionError(f"Workspace does not exist: {workspace}")
+        report.update(get_pull_request())
+        if git(workspace, "rev-parse", "HEAD", capture=True).stdout.strip() != report["head_sha"]:
+            raise ActionError("Checkout HEAD differs from the PR event head SHA; refusing stale worktree.")
+        if git(workspace, "status", "--porcelain", capture=True).stdout.strip():
+            raise ActionError("Worktree must be clean before PR Agent runs.")
+        trigger = os.environ.get("PR_AGENT_TRIGGER_ON", "conflict-only").strip().lower()
+        if trigger not in TRIGGER_MODES:
+            raise ActionError("trigger-on must be one of: conflict-only, always.")
+        model = os.environ.get("PR_AGENT_MODEL", "deepseek/deepseek-v4.1-flash")
+        task_instructions = os.environ.get("PR_AGENT_TASK_INSTRUCTIONS", "").strip()
+        validation_command = os.environ.get("PR_AGENT_VALIDATION_COMMAND", "").strip()
 
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    github_token = os.environ.get("GH_TOKEN", "")
-    if not api_key:
-        raise ActionError("openrouter-api-key is required.")
-    if not github_token:
-        raise ActionError("github-token is required.")
+        # Checkout with fetch-depth: 0 already fetches the base. Re-fetching over
+        # HTTPS fails for private repositories when credentials are not persisted.
+        # If a caller uses a shallow/single-branch checkout, fall back to fetch.
+        remote_base = f"refs/remotes/origin/{report['base_ref']}"
+        existing_base = git(workspace, "rev-parse", "--verify", remote_base,
+                            check=False, capture=True)
+        if existing_base.returncode:
+            git(workspace, "fetch", "--no-tags", "origin",
+                f"+refs/heads/{report['base_ref']}:{remote_base}")
+        report["base_sha"] = git(workspace, "rev-parse", remote_base, capture=True).stdout.strip()
+        attempt = git(workspace, "merge", "--no-commit", "--no-ff", f"origin/{report['base_ref']}", check=False, capture=True)
+        if attempt.stdout:
+            print(attempt.stdout, end="")
+        if attempt.stderr:
+            print(attempt.stderr, file=sys.stderr, end="")
+        unmerged = git(workspace, "ls-files", "-u", capture=True).stdout.strip()
+        if attempt.returncode and not unmerged:
+            raise ActionError("Base merge failed without a resolvable file conflict.")
+        report["conflicts_found"] = bool(unmerged)
+        if not unmerged and trigger == "conflict-only":
+            report.update(verdict="PASS", reason="no-conflicts")
+            print("No conflicts: skipping model and validation; no patch is emitted.")
+            return 0
 
-    pr_number, head_ref, base_ref = get_pull_request(workspace)
-    model = os.environ.get("PR_AGENT_MODEL", "deepseek/deepseek-v4.1-flash")
-    merge_method = os.environ.get("PR_AGENT_MERGE_METHOD", "squash").lower()
-    auto_merge = os.environ.get("PR_AGENT_AUTO_MERGE", "true").lower()
-    trigger_on = os.environ.get("PR_AGENT_TRIGGER_ON", "conflict-only").strip().lower()
-    task_instructions = os.environ.get("PR_AGENT_TASK_INSTRUCTIONS", "").strip()
-    validation_command = os.environ.get("PR_AGENT_VALIDATION_COMMAND", "true").strip()
-
-    if merge_method not in MERGE_METHODS:
-        raise ActionError("merge-method must be one of: squash, merge, rebase.")
-    if auto_merge not in {"true", "false"}:
-        raise ActionError("auto-merge must be 'true' or 'false'.")
-    if trigger_on not in TRIGGER_MODES:
-        raise ActionError("trigger-on must be 'conflict-only' or 'always'.")
-
-    print(f"Fetching base branch {base_ref} for PR #{pr_number}.")
-    git(
-        workspace,
-        "fetch",
-        "--no-tags",
-        "origin",
-        f"+refs/heads/{base_ref}:refs/remotes/origin/{base_ref}",
-    )
-    merge = git(
-        workspace,
-        "merge",
-        "--no-commit",
-        "--no-ff",
-        f"origin/{base_ref}",
-        check=False,
-        capture=True,
-    )
-    if merge.stdout:
-        print(merge.stdout, end="")
-    if merge.stderr:
-        print(merge.stderr, file=sys.stderr, end="")
-
-    has_conflicts = False
-    if merge.returncode:
-        conflicts = git(workspace, "ls-files", "-u", capture=True).stdout.strip()
-        if not conflicts:
-            raise ActionError("Merging the base branch failed without a resolvable file conflict.")
-        has_conflicts = True
-        print("Base merge has conflicts; asking the agent to resolve them.")
-    else:
-        print("Base merge succeeded cleanly without conflicts.")
-
-    env = os.environ.copy()
-    env["DSH_PERMISSION_MODE"] = "workspace-write"
-    env["DSH_TELEMETRY_DISABLED"] = "1"
-    auth_env = env.copy()
-    auth_env.pop("OPENROUTER_API_KEY", None)
-
-    if trigger_on == "conflict-only" and not has_conflicts:
-        print("Skipping agent invocation: no merge conflicts detected and trigger-on is 'conflict-only'.")
-        if (workspace / ".git" / "MERGE_HEAD").is_file():
-            git(workspace, "merge", "--abort", check=False)
-        git(workspace, "reset", "--hard", "HEAD", check=False)
-        if auto_merge == "true":
-            run(
-                ["gh", "pr", "merge", str(pr_number), "--auto", f"--{merge_method}"],
-                cwd=workspace,
-                env=auth_env,
-            )
-            print(f"Auto-merge enabled for clean PR #{pr_number} ({merge_method}).")
-        return 0
-
-    github_diff_before = git_hunks(workspace, ".github")
-    instructions = (
-        "Review this pull request against the fetched base branch.\n"
-        "Resolve simple merge conflicts and fix small, unambiguous correctness issues.\n"
-        "If the correct change is unsafe or ambiguous, leave it unresolved and return BLOCK.\n"
-        "Do not modify files under .github. Do not commit or push.\n"
-        "Do not add generated caches, bytecode, or test output to the PR.\n"
-    )
-    if task_instructions:
-        instructions += f"Repository-specific instructions:\n{task_instructions}\n"
-    instructions += "After finishing, end your final response with a standalone PASS or BLOCK line."
-
-    dsh_env = env.copy()
-    dsh_env.pop("GH_TOKEN", None)
-    with tempfile.TemporaryDirectory(prefix="pr-agent-") as temp_dir:
-        config_path = Path(temp_dir) / "dsh-openrouter.yml"
-        config_path.write_text(make_dsh_config(model), encoding="utf-8")
-        print(f"Running DeepSeek Harness with {model}.")
-        result = run(
-            [
-                "npx",
-                "-y",
-                f"@deepseek-ai/dsh@{DSH_VERSION}",
-                "--profile",
-                "headless",
-                "--patch",
-                str(config_path),
-                instructions,
-            ],
-            cwd=workspace,
-            check=False,
-            capture=True,
-            env=dsh_env,
+        if git(workspace, "ls-files", "-u", "--", ".github", capture=True).stdout.strip():
+            raise ActionError("Workflow files have merge conflicts; refusing automated repair.")
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            raise ActionError("OPENROUTER_API_KEY is required when the agent is invoked.")
+        baseline = snapshot_directory(workspace / ".github")
+        report["agent_invoked"] = True
+        instructions = (
+            "Review this pull request against the fetched base branch.\n"
+            "Resolve simple merge conflicts and fix small, unambiguous correctness issues.\n"
+            "If a change is unsafe or ambiguous, return BLOCK without claiming success.\n"
+            "Do not modify files under .github. Do not commit or push.\n"
+            "Do not add caches, bytecode or generated test output.\n"
         )
+        if task_instructions:
+            instructions += f"Repository-specific instructions:\n{task_instructions}\n"
+        instructions += "End your final response with one standalone line: PASS or BLOCK."
+        agent_env = os.environ.copy()
+        for key in ("GH_TOKEN", "GITHUB_TOKEN", "PR_AGENT_TOKEN"):
+            agent_env.pop(key, None)
+        agent_env["DSH_PERMISSION_MODE"] = "workspace-write"
+        agent_env["DSH_TELEMETRY_DISABLED"] = "1"
+        with tempfile.TemporaryDirectory(prefix="pr-agent-") as temp_dir:
+            config_path = Path(temp_dir) / "dsh-openrouter.yml"
+            config_path.write_text(make_dsh_config(model), encoding="utf-8")
+            result = run([
+                "npx", "-y", f"@deepseek-ai/dsh@{DSH_VERSION}",
+                "--profile", "headless", "--patch", str(config_path), instructions,
+            ], cwd=workspace, check=False, capture=True, env=agent_env)
         if result.stdout:
             print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
         if result.stderr:
             print(result.stderr, file=sys.stderr, end="")
         if result.returncode:
             raise ActionError(f"DeepSeek Harness exited with status {result.returncode}.")
-
-    verdict = next((line.strip() for line in reversed(result.stdout.splitlines()) if line.strip()), "")
-    if verdict != "PASS":
-        raise ActionError(f"Agent verdict was not PASS (last non-empty line: {verdict!r}).")
-
-    if git_hunks(workspace, ".github") != github_diff_before:
-        raise ActionError("The agent changed .github files; refusing to commit or push those changes.")
-    if git(workspace, "ls-files", "-u", capture=True).stdout.strip():
-        raise ActionError("Unresolved merge conflicts remain after the agent run.")
-
-    git(workspace, "diff", "--check")
-    git(workspace, "diff", "--cached", "--check")
-    if validation_command:
-        print(f"Running repository validation command: {validation_command}")
-        validation_env = env.copy()
-        validation_env.pop("GH_TOKEN", None)
-        validation_env.pop("OPENROUTER_API_KEY", None)
-        run(
-            ["bash", "-euo", "pipefail", "-c", validation_command],
-            cwd=workspace,
-            env=validation_env,
-        )
-
-    git(
-        workspace,
-        "add",
-        "-A",
-        "--",
-        ".",
-        ":(exclude,glob)**/__pycache__/**",
-        ":(exclude,glob)**/*.pyc",
-        ":(exclude,glob)**/*.pyo",
-        ":(exclude,glob)**/*.pyd",
-        ":(exclude,glob)**/.pytest_cache/**",
-        ":(exclude,glob)**/.mypy_cache/**",
-        ":(exclude,glob)**/.ruff_cache/**",
-    )
-    merge_in_progress = (workspace / ".git" / "MERGE_HEAD").is_file()
-    staged_changes = git(workspace, "diff", "--cached", "--quiet", check=False).returncode != 0
-    if merge_in_progress or staged_changes:
-        git(workspace, "config", "user.name", "github-actions[bot]")
-        git(workspace, "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com")
-        git(workspace, "commit", "-m", "[pr-agent] Resolve base conflicts and repair PR")
-        run(["gh", "auth", "setup-git"], cwd=workspace, env=auth_env)
-        git(workspace, "push", "origin", f"HEAD:{head_ref}")
-    else:
-        print("No repair commit is needed.")
-
-    if auto_merge == "true":
-        run(
-            ["gh", "pr", "merge", str(pr_number), "--auto", f"--{merge_method}"],
-            cwd=workspace,
-            env=auth_env,
-        )
-        print(f"Auto-merge enabled for PR #{pr_number} ({merge_method}).")
-    else:
-        print("Auto-merge is disabled; validated changes are pushed to the PR branch.")
-
-    return 0
+        verdict = next((line.strip() for line in reversed(result.stdout.splitlines()) if line.strip()), "")
+        if verdict != "PASS":
+            report.update(verdict="BLOCK", reason="agent-blocked")
+            raise ActionError(f"Agent verdict was not PASS (last non-empty line: {verdict!r}).")
+        if snapshot_directory(workspace / ".github") != baseline:
+            raise ActionError("Agent modified .github (including untracked files); refusing patch.")
+        git(workspace, "add", "-A", "--", ".",
+            ":(exclude,glob)**/__pycache__/**",
+            ":(exclude,glob)**/*.pyc", ":(exclude,glob)**/*.pyo",
+            ":(exclude,glob)**/.pytest_cache/**",
+            ":(exclude,glob)**/.mypy_cache/**",
+            ":(exclude,glob)**/.ruff_cache/**")
+        if git(workspace, "ls-files", "-u", capture=True).stdout.strip():
+            raise ActionError("Unresolved merge conflicts remain.")
+        git(workspace, "diff", "--cached", "--check")
+        if validation_command:
+            print(f"Validating: {validation_command}")
+            clean_env = os.environ.copy()
+            for key in ("GH_TOKEN", "GITHUB_TOKEN", "PR_AGENT_TOKEN", "OPENROUTER_API_KEY"):
+                clean_env.pop(key, None)
+            run(["bash", "-euo", "pipefail", "-c", validation_command], cwd=workspace, env=clean_env)
+            report["validation_passed"] = True
+        else:
+            report["validation_passed"] = None
+        if snapshot_directory(workspace / ".github") != baseline:
+            raise ActionError("Validation modified .github; refusing patch.")
+        if git(workspace, "status", "--porcelain", "--untracked-files=all", capture=True).stdout.strip():
+            # Validation may have changed tracked files after staging: refuse a stale or incomplete patch.
+            unstaged = git(workspace, "diff", "--name-only", capture=True).stdout.strip()
+            if unstaged:
+                raise ActionError("Validation modified tracked files after staging; refusing incomplete patch.")
+        patch = subprocess.run(["git", "diff", "--cached", "HEAD", "--binary"],
+                               cwd=workspace, check=True, stdout=subprocess.PIPE).stdout
+        report.update(verdict="PASS", reason="repaired" if report["conflicts_found"] else "reviewed")
+        print("Agent finished; emitting patch and JSON. No GitHub write action was performed.")
+        return 0
+    except ActionError as exc:
+        if report["verdict"] != "BLOCK":
+            report.update(verdict="BLOCK", reason=str(exc))
+        print(f"PR Agent blocked: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        report.update(verdict="ERROR", reason=f"Unexpected error: {exc}")
+        print(f"PR Agent errored: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        write_result(output, report, patch if report["verdict"] == "PASS" else b"")
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except ActionError as exc:
-        print(f"PR Agent failed: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+    raise SystemExit(main())

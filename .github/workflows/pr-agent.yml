@@ -1,10 +1,10 @@
-name: Reusable PR Agent
+name: Reusable PR Agent (patch only)
 
 on:
   workflow_call:
     inputs:
       validation-command:
-        description: Test or validation command for the caller repository.
+        description: Validation command for the caller repository.
         type: string
         required: true
       model:
@@ -12,21 +12,11 @@ on:
         type: string
         required: false
         default: deepseek/deepseek-v4.1-flash
-      auto-merge:
-        description: Push repairs and request GitHub auto-merge.
-        type: boolean
-        required: false
-        default: true
       trigger-on:
-        description: "When to invoke the agent: conflict-only (default) or always."
+        description: "When to call the agent: conflict-only (default) or always."
         type: string
         required: false
         default: conflict-only
-      merge-method:
-        description: "Merge method: squash, merge, or rebase."
-        type: string
-        required: false
-        default: squash
       task-instructions:
         description: Optional repository-specific instructions.
         type: string
@@ -35,12 +25,10 @@ on:
     secrets:
       OPENROUTER_API_KEY:
         required: true
-      PR_AGENT_TOKEN:
-        required: true
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: pr-agent-${{ github.repository }}-${{ github.event.pull_request.number }}
@@ -48,24 +36,33 @@ concurrency:
 
 jobs:
   agent:
-    if: github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.head.commit.message, '[pr-agent]')
+    # Fork PR code is untrusted; this default workflow must never expose model secrets to it.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Run PR Agent
+        id: repair
         uses: zc6600/agentic-swe/pr-agent@main
         with:
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
-          github-token: ${{ secrets.PR_AGENT_TOKEN }}
           model: ${{ inputs.model }}
           task-instructions: ${{ inputs.task-instructions }}
           validation-command: ${{ inputs.validation-command }}
-          auto-merge: ${{ inputs.auto-merge }}
           trigger-on: ${{ inputs.trigger-on }}
-          merge-method: ${{ inputs.merge-method }}
+
+      - name: Upload repair artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-agent-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/pr-agent-output/
+          if-no-files-found: ignore
+          retention-days: 7

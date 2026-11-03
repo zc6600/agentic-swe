@@ -1,36 +1,39 @@
-name: PR Agent Auto Repair
-description: Merge the PR base, resolve safe conflicts and fixes, validate, push, and enable auto-merge.
+name: PR Agent Patch Producer
+description: Review and repair a checked-out PR, emitting a JSON verdict and patch without publishing changes.
 
 inputs:
   openrouter-api-key:
     description: OpenRouter API key used by DeepSeek Harness.
-    required: true
-  github-token:
-    description: PAT or GitHub App token with contents:write and pull-requests:write permissions.
     required: true
   model:
     description: OpenRouter model identifier.
     required: false
     default: deepseek/deepseek-v4.1-flash
   task-instructions:
-    description: Additional repository-specific instructions for the agent.
+    description: Optional repository-specific instructions for the agent.
     required: false
     default: ""
   validation-command:
-    description: Shell command that must pass before the agent changes are pushed.
+    description: Command to validate agent changes; skipped when conflict-only finds no conflicts.
     required: true
-  auto-merge:
-    description: Enable GitHub auto-merge after pushing validated changes.
-    required: false
-    default: "true"
   trigger-on:
-    description: When to invoke the agent (conflict-only or always).
+    description: Invoke the agent on conflict-only (default) or always.
     required: false
     default: conflict-only
-  merge-method:
-    description: Merge method to request when auto-merge is enabled (squash, merge, or rebase).
-    required: false
-    default: squash
+
+outputs:
+  verdict:
+    description: PASS, BLOCK, or ERROR. PASS is not authorization to merge.
+    value: ${{ steps.agent.outputs.verdict }}
+  has-changes:
+    description: Whether repair.patch contains changes.
+    value: ${{ steps.agent.outputs.has-changes }}
+  result-path:
+    description: Absolute path of the JSON report in the runner.
+    value: ${{ steps.agent.outputs.result-path }}
+  patch-path:
+    description: Absolute path of the patch in the runner.
+    value: ${{ steps.agent.outputs.patch-path }}
 
 runs:
   using: composite
@@ -41,16 +44,15 @@ runs:
         node-version: "22"
 
     - name: Run PR Agent
+      id: agent
       shell: bash
       env:
         OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
-        GH_TOKEN: ${{ inputs.github-token }}
         PR_AGENT_MODEL: ${{ inputs.model }}
         PR_AGENT_TASK_INSTRUCTIONS: ${{ inputs.task-instructions }}
         PR_AGENT_VALIDATION_COMMAND: ${{ inputs.validation-command }}
-        PR_AGENT_AUTO_MERGE: ${{ inputs.auto-merge }}
         PR_AGENT_TRIGGER_ON: ${{ inputs.trigger-on }}
-        PR_AGENT_MERGE_METHOD: ${{ inputs.merge-method }}
+        PR_AGENT_OUTPUT_DIR: ${{ runner.temp }}/pr-agent-output
         DSH_PERMISSION_MODE: workspace-write
         DSH_TELEMETRY_DISABLED: "1"
       run: python3 "$GITHUB_ACTION_PATH/controller.py"
