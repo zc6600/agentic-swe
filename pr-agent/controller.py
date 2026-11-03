@@ -168,9 +168,16 @@ def main() -> int:
         task_instructions = os.environ.get("PR_AGENT_TASK_INSTRUCTIONS", "").strip()
         validation_command = os.environ.get("PR_AGENT_VALIDATION_COMMAND", "").strip()
 
-        git(workspace, "fetch", "--no-tags", "origin",
-            f"+refs/heads/{report['base_ref']}:refs/remotes/origin/{report['base_ref']}")
-        report["base_sha"] = git(workspace, "rev-parse", f"origin/{report['base_ref']}", capture=True).stdout.strip()
+        # Checkout with fetch-depth: 0 already fetches the base. Re-fetching over
+        # HTTPS fails for private repositories when credentials are not persisted.
+        # If a caller uses a shallow/single-branch checkout, fall back to fetch.
+        remote_base = f"refs/remotes/origin/{report['base_ref']}"
+        existing_base = git(workspace, "rev-parse", "--verify", remote_base,
+                            check=False, capture=True)
+        if existing_base.returncode:
+            git(workspace, "fetch", "--no-tags", "origin",
+                f"+refs/heads/{report['base_ref']}:{remote_base}")
+        report["base_sha"] = git(workspace, "rev-parse", remote_base, capture=True).stdout.strip()
         attempt = git(workspace, "merge", "--no-commit", "--no-ff", f"origin/{report['base_ref']}", check=False, capture=True)
         if attempt.stdout:
             print(attempt.stdout, end="")
