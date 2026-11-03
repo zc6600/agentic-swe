@@ -1,17 +1,17 @@
-<p className="feature-kicker">PULL REQUEST AUTOMATION</p>
+<p className="feature-kicker">PULL REQUEST REPAIR</p>
 
 # PR Agent
 
-Updates a pull request, repairs straightforward conflicts, runs your validation command, and queues passing changes for auto-merge. Fork pull requests are skipped; branch protection remains in control.
+The PR Agent attempts straightforward conflict repairs, validates them, and produces **`result.json` plus `repair.patch`**. It never commits, pushes, opens pull requests, or merges. You decide whether and how to publish the patch.
 
-**For maintainers:** Add `OPENROUTER_API_KEY` and a write-enabled `PR_AGENT_TOKEN`, choose your test command, and enable GitHub auto-merge.
+**For maintainers:** Add only `OPENROUTER_API_KEY`; no GitHub write token is required. The default reusable workflow runs for same-repository PRs only.
 
 <details id="maintainer-setup">
 <summary>Maintainer setup</summary>
 
-1. In **Settings → Secrets and variables → Actions**, add `OPENROUTER_API_KEY` and `PR_AGENT_TOKEN`. Use a fine-grained PAT or GitHub App token with **Contents: write** and **Pull requests: write**. `GITHUB_TOKEN` cannot normally trigger CI after a repair push.
-2. Add the workflow below and replace `npm test` with the repository's deterministic validation command.
-3. Enable **Allow auto-merge** and configure required branch checks.
+1. Add `OPENROUTER_API_KEY` under **Settings → Secrets and variables → Actions**.
+2. Install the workflow below, replacing `npm test` with a real test command.
+3. Find the JSON and patch in the workflow run artifacts. A clean PR skips the model in `conflict-only` mode.
 
 ```yaml
 name: PR Agent
@@ -21,8 +21,8 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   agent:
@@ -32,7 +32,6 @@ jobs:
       trigger-on: conflict-only
     secrets:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
 ```
 
 <button className="copy-button" type="button">Copy workflow</button>
@@ -42,39 +41,26 @@ jobs:
 <details id="agent-integration">
 <summary>Instructions for coding agents</summary>
 
-Copy these instructions into your coding agent. Secret values must be added by a maintainer in GitHub settings.
+Copy these instructions into your coding agent. Secret values must only be added by maintainers.
 
 ```text
-Integrate PR Agent into this repository.
+Integrate the output-only PR Agent into this repository.
 
-1. Inspect the default branch, existing pull request workflows, language, package manager, and deterministic validation command.
-2. Add .github/workflows/pr-agent.yml using the template below. Replace npm test with the detected validation command.
-3. Do not ask for, read, or write secret values. Tell the maintainer to add OPENROUTER_API_KEY and PR_AGENT_TOKEN in repository Actions settings. PR_AGENT_TOKEN needs Contents: write and Pull requests: write.
-4. Tell the maintainer to enable GitHub auto-merge and required branch checks. Fork pull requests are skipped.
-5. Validate the workflow and report the changed file, chosen validation command, and remaining maintainer steps.
+1. Inspect existing workflows and identify a meaningful test command.
+2. Add .github/workflows/pr-agent.yml using the example from docs/pr-agent.md.
+3. Configure permissions as contents: read and pull-requests: read.
+4. Ask the maintainer to set OPENROUTER_API_KEY; no PR_AGENT_TOKEN is needed.
+5. The workflow produces result.json and repair.patch. Do not add GitHub push or merge actions to the Agent.
+6. Default fork PRs are skipped; external PR code needs a separately isolated worker.
+7. Validate the workflow and explain how to inspect artifacts.
 
-name: PR Agent
-on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-permissions:
-  contents: write
-  pull-requests: write
-jobs:
-  agent:
-    uses: zc6600/agentic-swe/.github/workflows/pr-agent.yml@main
-    with:
-      validation-command: npm test
-      trigger-on: conflict-only
-    secrets:
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
-
-Never replace the repository's test command with `true`. Pin the workflow to a reviewed release or commit SHA for production.
+Never use `true` in place of tests. Pin workflow references to a reviewed release/commit in production.
 ```
 
 <button className="copy-button" type="button">Copy agent instructions</button>
 
 </details>
 
-[Workflow source](https://github.com/zc6600/agentic-swe/blob/main/.github/workflows/pr-agent.yml) · [Repository](https://github.com/zc6600/agentic-swe)
+**Security:** A `PASS` verdict is not merge approval. A separate trusted publisher must independently verify the patch, base/head SHAs and CI. Do not run untrusted fork code in a privileged `pull_request_target` job.
+
+[Workflow source](https://github.com/zc6600/agentic-swe/blob/main/.github/workflows/pr-agent.yml) · [Full documentation](https://github.com/zc6600/agentic-swe/blob/main/docs/pr-agent.md)

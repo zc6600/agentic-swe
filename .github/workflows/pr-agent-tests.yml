@@ -1,0 +1,27 @@
+name: PR Agent Unit Tests
+
+on:
+  pull_request:
+    paths:
+      - 'pr-agent/**'
+      - 'tests/test_pr_agent.py'
+      - '.github/workflows/pr-agent.yml'
+      - '.github/workflows/pr-agent-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pr-agent/**'
+      - 'tests/test_pr_agent.py'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run PR Agent tests
+        run: python3 -m unittest discover -s tests -v

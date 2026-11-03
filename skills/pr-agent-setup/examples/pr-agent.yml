@@ -5,8 +5,8 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 jobs:
   agent:
@@ -16,4 +16,3 @@ jobs:
       trigger-on: conflict-only
     secrets:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      PR_AGENT_TOKEN: ${{ secrets.PR_AGENT_TOKEN }}
